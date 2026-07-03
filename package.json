@@ -1,0 +1,26 @@
+{
+  "name": "maproulette-review",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 4201",
+    "dev:plugin": "concurrently -k \"npm:watch\" \"npm:preview\"",
+    "watch": "vite build --watch",
+    "build": "vite build",
+    "preview": "vite preview --port 4201",
+    "deploy:local": "npm run build && node -e \"const fs=require('fs');const d='../maproulette3/dist/plugins/review';fs.mkdirSync(d,{recursive:true});fs.copyFileSync('dist/maprouletteReviewPlugin.js',d+'/maprouletteReviewPlugin.js');console.log('Deployed to '+d)\""
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.3",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7"
+  }
+}
