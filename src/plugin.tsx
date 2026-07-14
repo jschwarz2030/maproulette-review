@@ -1,5 +1,10 @@
-import { Component, type ComponentType, useEffect, useId, useState } from 'react'
-import { cancelTaskReview, requestReviewForTask, startTaskReview, updateTaskReviewStatus } from './reviewApi'
+import { type ComponentType, useEffect, useId, useState } from 'react'
+import {
+  cancelTaskReview,
+  fetchReviewQueue,
+  startTaskReview,
+  updateTaskReviewStatus,
+} from './reviewApi'
 
 type RouteParams = Record<string, string>
 
@@ -71,6 +76,10 @@ type Plugin = {
       formState: Record<string, unknown>
       setFormState: (patch: Record<string, unknown>) => void
     }>
+    getStatusQueryParams?: (
+      formState: Record<string, unknown>,
+      context: { newStatus: number; task: unknown }
+    ) => Record<string, string | boolean | number | undefined | null>
   }>
   getTaskActionPanels?: () => Array<{
     id: string
@@ -86,6 +95,16 @@ type Plugin = {
       task: unknown
       search: Record<string, unknown>
       pathname: string
+    }>
+  }>
+  getUserSettingsFields?: () => Array<{
+    id: string
+    name: string
+    order?: number
+    component: ComponentType<{
+      value: unknown
+      onChange: (value: unknown) => void
+      disabled?: boolean
     }>
   }>
 }
@@ -139,12 +158,6 @@ const REVIEW_STATUS_LABELS: Record<number, string> = {
 const formatReviewStatus = (value: number | null | undefined): string => {
   if (value === null || value === undefined) return 'Not set'
   return REVIEW_STATUS_LABELS[value] ?? `Status ${value}`
-}
-
-type ReviewQueueState = {
-  loading: boolean
-  error: string | null
-  tasks: ReviewTask[]
 }
 
 const reviewStatusLabel = (value: number | undefined): string => {
@@ -219,144 +232,161 @@ const handleHostNavigationClick = (
   navigateInHostApp(path)
 }
 
-class ReviewQueuePage extends Component<{ params?: RouteParams }, ReviewQueueState> {
-  state: ReviewQueueState = {
-    loading: true,
-    error: null,
-    tasks: [],
+type ReviewQueueTab = 'toReview' | 'reviewed'
+
+const parseReviewTasks = (response: unknown): ReviewTask[] => {
+  if (Array.isArray(response)) {
+    return response.filter((item): item is ReviewTask => {
+      return typeof item === 'object' && item !== null && Number.isFinite((item as { id?: number }).id)
+    })
   }
 
-  componentDidMount(): void {
-    void this.loadFixedTasks()
-  }
-
-  loadFixedTasks = async (): Promise<void> => {
-    this.setState({ loading: true, error: null })
-
-    try {
-      if (!hostApiRequest) {
-        throw new Error('Host apiRequest is unavailable')
-      }
-
-      const parseTasks = (response: unknown): ReviewTask[] => {
-        if (Array.isArray(response)) {
-          return response.filter((item): item is ReviewTask => {
-            return typeof item === 'object' && item !== null && Number.isFinite((item as { id?: number }).id)
-          })
-        }
-
-        if (typeof response === 'object' && response !== null) {
-          const asRecord = response as { tasks?: unknown }
-          if (Array.isArray(asRecord.tasks)) {
-            return asRecord.tasks.filter((item): item is ReviewTask => {
-              return (
-                typeof item === 'object' &&
-                item !== null &&
-                Number.isFinite((item as { id?: number }).id)
-              )
-            })
-          }
-        }
-
-        return []
-      }
-
-      const reviewNeededResponse = await hostApiRequest
-        .get('api/v2/tasks/review?tStatus=1&limit=200&page=0')
-        .json<unknown>()
-      let tasks = parseTasks(reviewNeededResponse)
-
-      if (tasks.length === 0) {
-        const reviewedResponse = await hostApiRequest
-          .get('api/v2/tasks/reviewed?tStatus=1&limit=200&page=0&allowReviewNeeded=true')
-          .json<unknown>()
-        tasks = parseTasks(reviewedResponse)
-      }
-
-      this.setState({ loading: false, tasks })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error loading review tasks'
-      this.setState({ loading: false, error: message })
+  if (typeof response === 'object' && response !== null) {
+    const asRecord = response as { tasks?: unknown }
+    if (Array.isArray(asRecord.tasks)) {
+      return asRecord.tasks.filter((item): item is ReviewTask => {
+        return (
+          typeof item === 'object' &&
+          item !== null &&
+          Number.isFinite((item as { id?: number }).id)
+        )
+      })
     }
   }
 
-  render() {
-    const { Button } = getHostUi()
-
-    return (
-      <section className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
-        <h2 className="mt-0 text-lg font-semibold">Review Queue</h2>
-        <p className="mb-4 text-sm text-zinc-600 dark:text-slate-400">
-          Tasks with status fixed that are waiting for review.
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="mb-4"
-          onClick={() => void this.loadFixedTasks()}
-        >
-          Refresh
-        </Button>
-        {this.state.loading && <p className="text-sm">Loading fixed tasks...</p>}
-        {this.state.error && (
-          <p className="text-sm text-red-600 dark:text-red-400">{this.state.error}</p>
-        )}
-        {!this.state.loading && !this.state.error && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-zinc-200 text-left dark:border-slate-700">
-                  <th className="py-2 pr-4 font-medium">Task</th>
-                  <th className="py-2 pr-4 font-medium">Challenge</th>
-                  <th className="py-2 pr-4 font-medium">Review Status</th>
-                  <th className="py-2 pr-4 font-medium">Mapped On</th>
-                  <th className="py-2 font-medium">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {this.state.tasks.map((task) => (
-                  <tr key={task.id} className="border-b border-zinc-100 dark:border-slate-700/60">
-                    <td className="py-2 pr-4">#{task.id}</td>
-                    <td className="py-2 pr-4">
-                      {typeof task.parent === 'object' && task.parent?.name
-                        ? `${task.parent.name} (#${task.parent.id || 'n/a'})`
-                        : 'n/a'}
-                    </td>
-                    <td className="py-2 pr-4">
-                      {reviewStatusLabel(getReviewFields(task).reviewStatus ?? undefined)}
-                    </td>
-                    <td className="py-2 pr-4">{task.mappedOn || 'n/a'}</td>
-                    <td className="py-2">
-                      <a
-                        className="text-blue-600 hover:underline dark:text-blue-400"
-                        href={`/tasks/${task.id}?review=true`}
-                        onClick={(event) =>
-                          handleHostNavigationClick(event, `/tasks/${task.id}?review=true`)
-                        }
-                      >
-                        Open Review
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-                {this.state.tasks.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="py-4 text-zinc-500 dark:text-slate-400">
-                      No fixed tasks returned by backend.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    )
-  }
+  return []
 }
 
+const ReviewTasksPage = ({ kind }: { kind: ReviewQueueTab }) => {
+  const { Button } = getHostUi()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [tasks, setTasks] = useState<ReviewTask[]>([])
+
+  const loadTasks = async (): Promise<void> => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetchReviewQueue(kind)
+      setTasks(parseReviewTasks(response))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error loading review tasks'
+      setError(message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadTasks()
+  }, [kind])
+
+  const title = kind === 'toReview' ? 'To Review' : 'Reviewed'
+  const description =
+    kind === 'toReview'
+      ? 'Fixed tasks that still need review.'
+      : 'Tasks you have reviewed or requested review for.'
+  const emptyMessage =
+    kind === 'toReview' ? 'No tasks waiting for review.' : 'No reviewed tasks found.'
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="mt-0 text-lg font-semibold">{title}</h2>
+          <p className="mb-0 text-sm text-zinc-600 dark:text-slate-400">{description}</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => void loadTasks()}>
+          Refresh
+        </Button>
+      </div>
+
+      <div className="mb-4 flex gap-2 border-b border-zinc-200 dark:border-slate-700">
+        <a
+          href="/review"
+          className={`border-b-2 px-3 py-2 text-sm font-medium no-underline ${
+            kind === 'toReview'
+              ? 'border-zinc-900 text-zinc-900 dark:border-slate-100 dark:text-slate-100'
+              : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:text-slate-400 dark:hover:text-slate-200'
+          }`}
+          onClick={(event) => handleHostNavigationClick(event, '/review')}
+        >
+          To Review
+        </a>
+        <a
+          href="/reviewed"
+          className={`border-b-2 px-3 py-2 text-sm font-medium no-underline ${
+            kind === 'reviewed'
+              ? 'border-zinc-900 text-zinc-900 dark:border-slate-100 dark:text-slate-100'
+              : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:text-slate-400 dark:hover:text-slate-200'
+          }`}
+          onClick={(event) => handleHostNavigationClick(event, '/reviewed')}
+        >
+          Reviewed
+        </a>
+      </div>
+
+      {loading && <p className="text-sm">Loading tasks…</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+      {!loading && !error && (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-zinc-200 text-left dark:border-slate-700">
+                <th className="py-2 pr-4 font-medium">Task</th>
+                <th className="py-2 pr-4 font-medium">Challenge</th>
+                <th className="py-2 pr-4 font-medium">Review Status</th>
+                <th className="py-2 pr-4 font-medium">Mapped On</th>
+                <th className="py-2 font-medium">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr key={task.id} className="border-b border-zinc-100 dark:border-slate-700/60">
+                  <td className="py-2 pr-4">#{task.id}</td>
+                  <td className="py-2 pr-4">
+                    {typeof task.parent === 'object' && task.parent?.name
+                      ? `${task.parent.name} (#${task.parent.id || 'n/a'})`
+                      : 'n/a'}
+                  </td>
+                  <td className="py-2 pr-4">
+                    {reviewStatusLabel(getReviewFields(task).reviewStatus ?? undefined)}
+                  </td>
+                  <td className="py-2 pr-4">{task.mappedOn || 'n/a'}</td>
+                  <td className="py-2">
+                    <a
+                      className="text-blue-600 hover:underline dark:text-blue-400"
+                      href={`/tasks/${task.id}?review=true`}
+                      onClick={(event) =>
+                        handleHostNavigationClick(event, `/tasks/${task.id}?review=true`)
+                      }
+                    >
+                      {kind === 'toReview' ? 'Open Review' : 'Open Task'}
+                    </a>
+                  </td>
+                </tr>
+              ))}
+              {tasks.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-4 text-zinc-500 dark:text-slate-400">
+                    {emptyMessage}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+const ToReviewPage = (_props: { params?: RouteParams }) => <ReviewTasksPage kind="toReview" />
+const ReviewedPage = (_props: { params?: RouteParams }) => <ReviewTasksPage kind="reviewed" />
+
 const RequestReviewExtension = ({
-  task,
   newStatus,
   formState,
   setFormState,
@@ -367,7 +397,6 @@ const RequestReviewExtension = ({
   formState: Record<string, unknown>
   setFormState: (patch: Record<string, unknown>) => void
 }) => {
-  const taskId = (task as { id: number }).id
   const isCompletionStatus = [1, 2, 5, 6].includes(newStatus)
   const checked = Boolean(formState.requestReview)
 
@@ -376,15 +405,6 @@ const RequestReviewExtension = ({
       setFormState({ requestReview: newStatus === 1 })
     }
   }, [newStatus, isCompletionStatus, formState, setFormState])
-
-  useEffect(() => {
-    if (!checked || !taskId) return
-    return () => {
-      if (checked) {
-        void requestReviewForTask(taskId).catch(() => {})
-      }
-    }
-  }, [checked, taskId])
 
   if (!isCompletionStatus) {
     return null
@@ -574,6 +594,54 @@ const ReviewTaskActionsPanel = ({
   )
 }
 
+const ReviewerSettingsField = ({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: unknown
+  onChange: (value: unknown) => void
+  disabled?: boolean
+}) => {
+  const { Label } = getHostUi()
+  const yesId = useId()
+  const noId = useId()
+  const isReviewer = Boolean(value)
+
+  return (
+    <div className="space-y-2">
+      <Label className="font-medium text-sm">Volunteer as a Reviewer</Label>
+      <div className="flex gap-6">
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="radio"
+            name="isReviewer"
+            id={yesId}
+            checked={isReviewer}
+            disabled={disabled}
+            onChange={() => onChange(true)}
+          />
+          <span className="text-sm">Yes</span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="radio"
+            name="isReviewer"
+            id={noId}
+            checked={!isReviewer}
+            disabled={disabled}
+            onChange={() => onChange(false)}
+          />
+          <span className="text-sm">No</span>
+        </label>
+      </div>
+      <p className="text-xs text-zinc-500 dark:text-slate-400">
+        Volunteer to review tasks for which a review has been requested
+      </p>
+    </div>
+  )
+}
+
 const plugin: Plugin = {
   metadata: {
     id: 'maproulette-review-plugin',
@@ -590,19 +658,32 @@ const plugin: Plugin = {
   },
   getNavigationItems: () => [
     {
-      id: 'maproulette-review-nav',
-      label: 'Review',
+      id: 'maproulette-review-nav-to-review',
+      label: 'To Review',
       to: '/review',
       order: 90,
+    },
+    {
+      id: 'maproulette-review-nav-reviewed',
+      label: 'Reviewed',
+      to: '/reviewed',
+      order: 91,
     },
   ],
   getPages: () => [
     {
-      id: 'maproulette-review-queue-page',
-      title: 'Review Queue',
+      id: 'maproulette-review-to-review-page',
+      title: 'To Review',
       path: '/review',
-      component: ReviewQueuePage,
-      description: 'Fixed task review table',
+      component: ToReviewPage,
+      description: 'Tasks waiting for review',
+    },
+    {
+      id: 'maproulette-review-reviewed-page',
+      title: 'Reviewed',
+      path: '/reviewed',
+      component: ReviewedPage,
+      description: 'Tasks already reviewed',
     },
   ],
   getTaskActionExtensions: () => [
@@ -611,6 +692,10 @@ const plugin: Plugin = {
       label: 'Request Review',
       order: 10,
       component: RequestReviewExtension,
+      getStatusQueryParams: (formState) => ({
+        requestReview:
+          typeof formState.requestReview === 'boolean' ? formState.requestReview : undefined,
+      }),
     },
   ],
   getTaskActionPanels: () => [
@@ -621,6 +706,14 @@ const plugin: Plugin = {
       order: 10,
       isActive: () => isReviewModeActive(),
       component: ReviewTaskActionsPanel,
+    },
+  ],
+  getUserSettingsFields: () => [
+    {
+      id: 'maproulette-review-volunteer-reviewer',
+      name: 'isReviewer',
+      order: 20,
+      component: ReviewerSettingsField,
     },
   ],
 }

@@ -8,10 +8,10 @@ This plugin is an IIFE bundle (`maprouletteReviewPlugin.js`) that registers itse
 
 ## What it adds
 
-- **Review** nav item
-- **/review** page with a review queue table
+- **To Review** (`/review`) and **Reviewed** (`/reviewed`) nav items + pages
 - **Request review** checkbox in the task action modal
 - **Review actions panel** (claim, approve, reject) on task pages opened with `?review=true`
+- **Volunteer as a Reviewer** field injected into Account → General via `getUserSettingsFields`
 
 ## Local development
 

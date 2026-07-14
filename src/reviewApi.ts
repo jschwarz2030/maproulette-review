@@ -57,9 +57,14 @@ export const updateTaskReviewStatus = async <T = unknown>({
   return apiRequest.get(`api/v2/task/${taskId}?mapillary=false`).json<T>()
 }
 
-export const requestReviewForTask = async (taskId: number): Promise<void> => {
+export const fetchReviewQueue = async <T = unknown>(
+  kind: 'toReview' | 'reviewed'
+): Promise<T> => {
   const apiRequest = getApiRequest()
-  await apiRequest.put(`api/v2/task/${taskId}/1`, {
-    json: { requestReview: true },
-  })
+  const path =
+    kind === 'toReview'
+      ? 'api/v2/tasks/review?tStatus=1&limit=200&page=0'
+      : 'api/v2/tasks/reviewed?tStatus=1&limit=200&page=0'
+  return apiRequest.get(path).json<T>()
 }
+
