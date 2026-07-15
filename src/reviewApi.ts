@@ -68,3 +68,22 @@ export const fetchReviewQueue = async <T = unknown>(
   return apiRequest.get(path).json<T>()
 }
 
+const TEST_QUERY = import.meta.env.TEST_QUERY as string | undefined
+
+export const fetchTestQuery = async (): Promise<string> => {
+  if (!TEST_QUERY) {
+    throw new Error('TEST_QUERY is not configured')
+  }
+  const response = await fetch(TEST_QUERY, {
+    credentials: 'include',
+  })
+  if (!response.ok) {
+    throw new Error(`TEST_QUERY request failed (${response.status})`)
+  }
+  const data: unknown = await response.json()
+  if (typeof data === 'string') {
+    return data
+  }
+  return String(data)
+}
+

@@ -3,6 +3,8 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [react()],
+  // Allow TEST_* (and default VITE_*) env vars through to import.meta.env
+  envPrefix: ['VITE_', 'TEST_'],
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
     process: JSON.stringify({

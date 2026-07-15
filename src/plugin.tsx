@@ -2,6 +2,7 @@ import { type ComponentType, useEffect, useId, useState } from 'react'
 import {
   cancelTaskReview,
   fetchReviewQueue,
+  fetchTestQuery,
   startTaskReview,
   updateTaskReviewStatus,
 } from './reviewApi'
@@ -262,6 +263,8 @@ const ReviewTasksPage = ({ kind }: { kind: ReviewQueueTab }) => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tasks, setTasks] = useState<ReviewTask[]>([])
+  const [testQueryResult, setTestQueryResult] = useState<string | null>(null)
+  const [testQueryError, setTestQueryError] = useState<string | null>(null)
 
   const loadTasks = async (): Promise<void> => {
     setLoading(true)
@@ -282,6 +285,27 @@ const ReviewTasksPage = ({ kind }: { kind: ReviewQueueTab }) => {
     void loadTasks()
   }, [kind])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await fetchTestQuery()
+        if (!cancelled) {
+          setTestQueryResult(result)
+          setTestQueryError(null)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setTestQueryResult(null)
+          setTestQueryError(err instanceof Error ? err.message : 'TEST_QUERY request failed')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const title = kind === 'toReview' ? 'To Review' : 'Reviewed'
   const description =
     kind === 'toReview'
@@ -296,6 +320,12 @@ const ReviewTasksPage = ({ kind }: { kind: ReviewQueueTab }) => {
         <div>
           <h2 className="mt-0 text-lg font-semibold">{title}</h2>
           <p className="mb-0 text-sm text-zinc-600 dark:text-slate-400">{description}</p>
+          {testQueryResult && (
+            <p className="mb-0 mt-1 text-xs text-zinc-500 dark:text-slate-400">{testQueryResult}</p>
+          )}
+          {testQueryError && (
+            <p className="mb-0 mt-1 text-xs text-red-600 dark:text-red-400">{testQueryError}</p>
+          )}
         </div>
         <Button variant="outline" size="sm" onClick={() => void loadTasks()}>
           Refresh
