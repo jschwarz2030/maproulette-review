@@ -68,6 +68,73 @@ export const fetchReviewQueue = async <T = unknown>(
   return apiRequest.get(path).json<T>()
 }
 
+export interface ChallengeReviewMetrics {
+  total: number
+  reviewRequested: number
+  reviewApproved: number
+  reviewRejected: number
+  reviewAssisted: number
+  reviewDisputed: number
+  metaReviewRequested: number
+  metaReviewApproved: number
+  metaReviewRejected: number
+  metaReviewAssisted: number
+  avgReviewTime: number
+  completed: number
+  remaining: number
+}
+
+export const fetchChallengeReviewProgress = async (
+  challengeId: number
+): Promise<ChallengeReviewMetrics> => {
+  const apiRequest = getApiRequest()
+  const metrics = await apiRequest
+    .get(`api/v2/tasks/review/metrics?reviewTasksType=4&cid=${challengeId}`)
+    .json<Array<Omit<ChallengeReviewMetrics, 'completed' | 'remaining'>>>()
+  const reviewMetrics = metrics[0]
+
+  if (!reviewMetrics) {
+    return {
+      total: 0,
+      reviewRequested: 0,
+      reviewApproved: 0,
+      reviewRejected: 0,
+      reviewAssisted: 0,
+      reviewDisputed: 0,
+      metaReviewRequested: 0,
+      metaReviewApproved: 0,
+      metaReviewRejected: 0,
+      metaReviewAssisted: 0,
+      avgReviewTime: 0,
+      completed: 0,
+      remaining: 0,
+    }
+  }
+
+  const remaining = reviewMetrics.reviewRequested + reviewMetrics.reviewDisputed
+  return {
+    ...reviewMetrics,
+    completed: Math.max(0, reviewMetrics.total - remaining),
+    remaining,
+  }
+}
+
+export const fetchNextChallengeReview = async <T = unknown>(challengeId: number): Promise<T> => {
+  const apiRequest = getApiRequest()
+  return apiRequest.get(`api/v2/tasks/review/next?cid=${challengeId}`).json<T>()
+}
+
+export const fetchNearbyChallengeReviews = async <T = unknown>(
+  taskId: number,
+  challengeId: number,
+  limit = 5
+): Promise<T> => {
+  const apiRequest = getApiRequest()
+  return apiRequest
+    .get(`api/v2/tasks/review/nearby/${taskId}?cid=${challengeId}&limit=${limit}`)
+    .json<T>()
+}
+
 const TEST_QUERY = import.meta.env.TEST_QUERY as string | undefined
 
 export const fetchTestQuery = async (): Promise<string> => {
