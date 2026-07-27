@@ -170,6 +170,40 @@ let hostUiFromInit: HostUiComponents | undefined
 let hostApiRequest: PluginApiContext['apiRequest']
 let hostNavigate: ((path: string) => void) | undefined
 let hostUser: PluginUser | null | undefined
+/** Plugin-owned cache of volunteer-as-reviewer status (not read from core). */
+let cachedIsReviewer = false
+
+const rememberReviewerStatus = (user?: PluginUser | null): void => {
+  if (!user) return
+  cachedIsReviewer = Boolean(user.settings?.isReviewer)
+  hostUser = {
+    id: user.id,
+    settings: {
+      isReviewer: user.settings?.isReviewer ?? null,
+    },
+  }
+}
+
+const loadReviewerStatus = async (): Promise<boolean> => {
+  if (!hostApiRequest) {
+    return cachedIsReviewer
+  }
+  try {
+    const whoAmI = await hostApiRequest.get('api/v2/user/whoami').json<{
+      id?: number
+      settings?: { isReviewer?: boolean | null }
+    }>()
+    if (typeof whoAmI?.id === 'number') {
+      rememberReviewerStatus({
+        id: whoAmI.id,
+        settings: { isReviewer: whoAmI.settings?.isReviewer ?? null },
+      })
+    }
+  } catch {
+    // Keep the last known value if whoami fails.
+  }
+  return cachedIsReviewer
+}
 
 type TaskReviewFields = {
   reviewStatus?: number | null
@@ -270,19 +304,19 @@ const getHostUi = (): HostUiComponents => {
 }
 
 const getHostPluginApi = (): {
-  user?: { id: number } | null
+  user?: PluginUser | null
 } | undefined => {
-  const liveContext = (
-    window as unknown as {
-      __maproulettePluginApi?: {
-        user?: { id: number } | null
-      }
-    }
-  ).__maproulettePluginApi
-
   return {
-    user: liveContext?.user ?? hostUser ?? null,
+    user: hostUser ?? null,
   }
+}
+
+/** True when the signed-in user has volunteered as a reviewer (plugin-owned check). */
+const isCurrentUserReviewer = (user?: PluginUser | null): boolean => {
+  if (user) {
+    rememberReviewerStatus(user)
+  }
+  return cachedIsReviewer
 }
 
 const navigateInHostApp = (path: string): void => {
@@ -345,6 +379,7 @@ const ReviewTasksPage = ({ kind }: { kind: ReviewQueueTab }) => {
   const [tasks, setTasks] = useState<ReviewTask[]>([])
   const [testQueryResult, setTestQueryResult] = useState<string | null>(null)
   const [testQueryError, setTestQueryError] = useState<string | null>(null)
+  const [canReview, setCanReview] = useState(() => isCurrentUserReviewer())
 
   const loadTasks = async (): Promise<void> => {
     setLoading(true)
@@ -364,6 +399,16 @@ const ReviewTasksPage = ({ kind }: { kind: ReviewQueueTab }) => {
   useEffect(() => {
     void loadTasks()
   }, [kind])
+
+  useEffect(() => {
+    let cancelled = false
+    void loadReviewerStatus().then((isReviewer) => {
+      if (!cancelled) setCanReview(isReviewer)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -411,6 +456,20 @@ const ReviewTasksPage = ({ kind }: { kind: ReviewQueueTab }) => {
           Refresh
         </Button>
       </div>
+
+      {!canReview && (
+        <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+          Volunteer as a reviewer in{' '}
+          <a
+            href="/settings"
+            className="font-medium underline"
+            onClick={(event) => handleHostNavigationClick(event, '/settings')}
+          >
+            Settings
+          </a>{' '}
+          to open tasks in review mode.
+        </p>
+      )}
 
       <div className="mb-4 flex gap-2 border-b border-zinc-200 dark:border-slate-700">
         <a
@@ -466,15 +525,19 @@ const ReviewTasksPage = ({ kind }: { kind: ReviewQueueTab }) => {
                   </td>
                   <td className="py-2 pr-4">{task.mappedOn || 'n/a'}</td>
                   <td className="py-2">
-                    <a
-                      className="text-blue-600 hover:underline dark:text-blue-400"
-                      href={`/tasks/${task.id}?review=true`}
-                      onClick={(event) =>
-                        handleHostNavigationClick(event, `/tasks/${task.id}?review=true`)
-                      }
-                    >
-                      {kind === 'toReview' ? 'Open Review' : 'Open Task'}
-                    </a>
+                    {canReview ? (
+                      <a
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                        href={`/tasks/${task.id}?review=true`}
+                        onClick={(event) =>
+                          handleHostNavigationClick(event, `/tasks/${task.id}?review=true`)
+                        }
+                      >
+                        {kind === 'toReview' ? 'Open Review' : 'Open Task'}
+                      </a>
+                    ) : (
+                      <span className="text-zinc-400 dark:text-slate-500">Review locked</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -590,10 +653,23 @@ const ReviewTaskActionsPanel = ({
   const [continuationError, setContinuationError] = useState<string | null>(null)
   const [reviewSubmitted, setReviewSubmitted] = useState(false)
   const [isLastReviewTask, setIsLastReviewTask] = useState(false)
+  const [canReview, setCanReview] = useState<boolean | null>(() =>
+    cachedIsReviewer ? true : null
+  )
 
   useEffect(() => {
     setTask(taskProp as ReviewTask)
   }, [taskProp])
+
+  useEffect(() => {
+    let cancelled = false
+    void loadReviewerStatus().then((isReviewer) => {
+      if (!cancelled) setCanReview(isReviewer)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const reviewFields = getReviewFields(task)
   const hostApi = getHostPluginApi()
@@ -607,6 +683,32 @@ const ReviewTaskActionsPanel = ({
   const reviewChallengeId =
     challengeIdFromSearch ??
     (typeof task.parent === 'number' ? task.parent : (task.parent?.id ?? null))
+
+  if (canReview === null) {
+    return (
+      <p className="px-1 py-2 text-center text-xs text-zinc-500 dark:text-slate-400">
+        Checking reviewer access…
+      </p>
+    )
+  }
+
+  if (!canReview) {
+    return (
+      <div className="rounded-lg bg-zinc-100 p-3 dark:bg-slate-800/60">
+        <p className="mb-2 text-sm text-zinc-700 dark:text-slate-200">
+          Volunteer as a reviewer in Settings to review tasks.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={() => navigateInHostApp('/settings')}
+        >
+          Open Settings
+        </Button>
+      </div>
+    )
+  }
 
   const runAction = async (action: () => Promise<ReviewTask>, successMessage: string) => {
     try {
@@ -1285,16 +1387,25 @@ const ReviewChallengeFooter = ({
   mapContent,
 }: ChallengeActionContext & { mapContent: ReactNode }) => {
   const { Tabs, TabsContent, TabsList, TabsTrigger } = getHostUi()
+  const pluginUser =
+    user && typeof (user as PluginUser).id === 'number'
+      ? (user as PluginUser)
+      : null
+
+  // Non-reviewers only see the native map / start-challenge footer.
+  if (!isCurrentUserReviewer(pluginUser)) {
+    return <>{mapContent}</>
+  }
 
   return (
-    <Tabs defaultValue={user?.settings?.isReviewer ? 'review' : 'map'}>
+    <Tabs defaultValue="review">
       <TabsList className="w-full">
         <TabsTrigger value="map">Map</TabsTrigger>
         <TabsTrigger value="review">Review</TabsTrigger>
       </TabsList>
       <TabsContent value="map">{mapContent}</TabsContent>
       <TabsContent value="review">
-        <ReviewChallengeWidget challenge={challenge} user={user} />
+        <ReviewChallengeWidget challenge={challenge} user={pluginUser} />
       </TabsContent>
     </Tabs>
   )
@@ -1312,7 +1423,11 @@ const plugin: Plugin = {
     hostUiFromInit = context?.ui
     hostApiRequest = context?.apiRequest
     hostNavigate = context?.navigate
-    hostUser = context?.user ?? null
+    hostUser =
+      context?.user && typeof context.user.id === 'number'
+        ? { id: context.user.id }
+        : null
+    void loadReviewerStatus()
   },
   getNavigationItems: () => [
     {
