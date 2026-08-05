@@ -26,6 +26,10 @@ export default defineConfig({
     },
     outDir: 'dist',
     emptyOutDir: true,
+    // Minified production bundle + maps so DevTools can decode stacks when
+    // diagnosing against the same artifact deployed to maproulette3.
+    minify: true,
+    sourcemap: true,
     rollupOptions: {
       external: ['react', 'react-dom', 'react/jsx-runtime'],
       output: {
