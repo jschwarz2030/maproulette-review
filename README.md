@@ -8,9 +8,12 @@ This plugin is an IIFE bundle (`maprouletteReviewPlugin.js`) that registers itse
 
 ## What it adds
 
-- **To Review** (`/review`) and **Reviewed** (`/reviewed`) nav items + pages
-- **Request review** checkbox in the task action modal
-- **Review actions panel** (claim, approve, reject) on task pages opened with `?review=true`
+- **Review dashboard** (`/review`) — role-aware table + side panel:
+  - **Mappers**: tasks you've mapped/requested review for; Needs revision (Rejected/Disputed) sorted first; filter chips; row click opens preview + comments
+  - **Reviewers**: To review / My reviews tabs; re-review priority; same side panel triage UX
+- **`/reviewed`** redirects to the same dashboard (bookmark-compatible)
+- **Request review** on task completion (status update query param)
+- **Review actions panel** (lock, approve, reject) on task pages opened with `?review=true`
 - **Volunteer as a Reviewer** field injected into Account → General via `getUserSettingsFields`
 
 ## Local development
