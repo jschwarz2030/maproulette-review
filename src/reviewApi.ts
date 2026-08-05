@@ -1,34 +1,10 @@
-type ApiRequest = {
-  put: (
-    url: string,
-    options?: {
-      json?: unknown
-    }
-  ) => {
-    json: <T = unknown>() => Promise<T>
-    text: () => Promise<string>
-  }
-  get: (url: string) => {
-    json: <T = unknown>() => Promise<T>
-    text: () => Promise<string>
-  }
-}
+import { getHostApiRequest } from './host'
+import type { ReviewTask } from './types'
+import { parseReviewTasks } from './lib/reviewStatus'
 
-const getApiRequest = (): ApiRequest => {
-  const live = (
-    window as unknown as {
-      __maproulettePluginApi?: {
-        apiRequest?: ApiRequest
-      }
-    }
-  ).__maproulettePluginApi
+type ApiRequest = NonNullable<ReturnType<typeof getHostApiRequest>>
 
-  if (!live?.apiRequest) {
-    throw new Error('Host apiRequest is unavailable')
-  }
-
-  return live.apiRequest
-}
+const getApiRequest = (): ApiRequest => getHostApiRequest()
 
 export const startTaskReview = async <T = unknown>(taskId: number): Promise<T> => {
   const apiRequest = getApiRequest()
@@ -44,14 +20,27 @@ export const updateTaskReviewStatus = async <T = unknown>({
   taskId,
   reviewStatus,
   comment,
+  newTaskStatus,
+  errorTags,
 }: {
   taskId: number
   reviewStatus: number
   comment?: string
+  newTaskStatus?: number | null
+  errorTags?: string | null
 }): Promise<T> => {
   const apiRequest = getApiRequest()
   const trimmed = comment?.trim()
-  await apiRequest.put(`api/v2/task/${taskId}/review/${reviewStatus}`, {
+  const params = new URLSearchParams()
+  if (newTaskStatus != null) {
+    params.set('newTaskStatus', String(newTaskStatus))
+  }
+  if (errorTags?.trim()) {
+    params.set('errorTags', errorTags.trim())
+  }
+  const query = params.toString()
+  const url = `api/v2/task/${taskId}/review/${reviewStatus}${query ? `?${query}` : ''}`
+  await apiRequest.put(url, {
     json: { comment: trimmed || '' },
   })
   return apiRequest.get(`api/v2/task/${taskId}?mapillary=false`).json<T>()
@@ -66,6 +55,43 @@ export const fetchReviewQueue = async <T = unknown>(
       ? 'api/v2/tasks/review?tStatus=1&limit=200&page=0'
       : 'api/v2/tasks/reviewed?tStatus=1&limit=200&page=0'
   return apiRequest.get(path).json<T>()
+}
+
+/** Tasks needing review (reviewer queue). */
+export const fetchTasksToReview = async (): Promise<ReviewTask[]> => {
+  const apiRequest = getApiRequest()
+  const response = await apiRequest
+    .get('api/v2/tasks/review?limit=200&page=0&sort=mapped_on&order=DESC')
+    .json<unknown>()
+  return parseReviewTasks(response)
+}
+
+/** Tasks this reviewer has already reviewed. */
+export const fetchMyReviewedTasks = async (): Promise<ReviewTask[]> => {
+  const apiRequest = getApiRequest()
+  const response = await apiRequest
+    .get('api/v2/tasks/reviewed?limit=200&page=0&sort=reviewed_at&order=DESC')
+    .json<unknown>()
+  return parseReviewTasks(response)
+}
+
+/**
+ * Mapper's own review-related tasks.
+ * Backend requires non-reviewers to pass users=<own id>.
+ */
+export const fetchMapperReviewTasks = async (userId: number): Promise<ReviewTask[]> => {
+  const apiRequest = getApiRequest()
+  const response = await apiRequest
+    .get(
+      `api/v2/tasks/reviewed?users=${userId}&allowReviewNeeded=true&limit=200&page=0&sort=mapped_on&order=DESC`
+    )
+    .json<unknown>()
+  return parseReviewTasks(response)
+}
+
+export const fetchTask = async (taskId: number): Promise<ReviewTask> => {
+  const apiRequest = getApiRequest()
+  return apiRequest.get(`api/v2/task/${taskId}?mapillary=false`).json<ReviewTask>()
 }
 
 export interface ChallengeReviewMetrics {
@@ -135,6 +161,20 @@ export const fetchNearbyChallengeReviews = async <T = unknown>(
     .json<T>()
 }
 
+export const fetchChallengeRequireRejectReason = async (
+  challengeId: number
+): Promise<boolean> => {
+  const apiRequest = getApiRequest()
+  try {
+    const challenge = await apiRequest
+      .get(`api/v2/challenge/${challengeId}`)
+      .json<{ requireRejectReason?: boolean | null }>()
+    return Boolean(challenge?.requireRejectReason)
+  } catch {
+    return false
+  }
+}
+
 const TEST_QUERY = import.meta.env.TEST_QUERY as string | undefined
 
 export const fetchTestQuery = async (): Promise<string> => {
@@ -153,4 +193,3 @@ export const fetchTestQuery = async (): Promise<string> => {
   }
   return String(data)
 }
-
