@@ -9,9 +9,10 @@
     "watch": "vite build --watch",
     "build": "vite build",
     "preview": "vite preview --port 4201",
+    "serve:min": "npm run build && vite preview --host --port 4201",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy:local": "npm run build && node -e \"const fs=require('fs');const d='../maproulette3/dist/plugins/review';fs.mkdirSync(d,{recursive:true});fs.copyFileSync('dist/maprouletteReviewPlugin.js',d+'/maprouletteReviewPlugin.js');console.log('Deployed to '+d)\""
+    "deploy:local": "npm run build && node scripts/deploy-local.mjs"
   },
   "dependencies": {
     "react": "^19.1.1",
