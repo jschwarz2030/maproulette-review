@@ -284,7 +284,12 @@ export const ReviewTaskTable = ({
           const reReview = showReReviewBadge && isReReviewForUser(task, currentUserId)
           const lock = getReviewLock(task, currentUserId)
           const parentId = challengeId(task)
-          const taskHref = isReviewer ? `/tasks/${task.id}?review=true` : `/tasks/${task.id}`
+          const taskHref =
+            isReviewer && parentId != null
+              ? `/tasks/${task.id}?review=true&reviewChallengeId=${parentId}`
+              : isReviewer
+                ? `/tasks/${task.id}?review=true`
+                : `/tasks/${task.id}`
           const challengeHref = parentId != null ? `/challenge/${parentId}` : null
 
           const activateRow = () => {

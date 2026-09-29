@@ -147,7 +147,9 @@ export const fetchChallengeReviewProgress = async (
 
 export const fetchNextChallengeReview = async <T = unknown>(challengeId: number): Promise<T> => {
   const apiRequest = getApiRequest()
-  return apiRequest.get(`api/v2/tasks/review/next?cid=${challengeId}`).json<T>()
+  return apiRequest
+    .get(`api/v2/tasks/review/next?cid=${challengeId}`)
+    .json<T>()
 }
 
 export const fetchNearbyChallengeReviews = async <T = unknown>(

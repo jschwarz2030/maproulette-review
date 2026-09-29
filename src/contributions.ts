@@ -1,5 +1,9 @@
 import { ReviewHistoryItem, canRenderReviewHistoryItem } from './components/ReviewHistoryItem'
 import {
+  ReviewSessionHistoryItem,
+  canRenderReviewSessionHistoryItem,
+} from './components/ReviewSessionHistoryItem'
+import {
   isMapperRevisionPanelActive,
   MapperRevisionActionsPanel,
 } from './components/MapperRevisionActions'
@@ -66,7 +70,7 @@ export const getTaskActionPanels: NonNullable<Plugin['getTaskActionPanels']> = (
     label: 'Review Task Actions',
     slot: 'replace',
     order: 10,
-    isActive: () => isReviewModeActive(),
+    isActive: (context) => isReviewModeActive(context.search),
     component: ReviewTaskActionsPanel,
   },
   {
@@ -92,6 +96,12 @@ export const getChallengeFooterExtensions: NonNullable<
 export const getTaskHistoryItemRenderers: NonNullable<
   Plugin['getTaskHistoryItemRenderers']
 > = () => [
+  {
+    id: 'maproulette-review-session-history-item',
+    order: 5,
+    canRender: canRenderReviewSessionHistoryItem,
+    component: ReviewSessionHistoryItem,
+  },
   {
     id: 'maproulette-review-history-item',
     order: 10,

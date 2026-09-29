@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   getHostUi,
   getHostUser,
@@ -29,8 +29,16 @@ import {
 } from '../lib/errorTags'
 import type { PluginTaskMapItem, ReviewTask } from '../types'
 
+const reviewChallengeIdFromSearch = (search: Record<string, unknown>): number | null => {
+  const fromSearch = search.reviewChallengeId
+  if (typeof fromSearch === 'number' && Number.isFinite(fromSearch)) return fromSearch
+  if (typeof fromSearch === 'string') return Number(fromSearch) || null
+  return null
+}
+
 export const ReviewTaskActionsPanel = ({
   task: taskProp,
+  search,
 }: {
   task: unknown
   search: Record<string, unknown>
@@ -59,7 +67,9 @@ export const ReviewTaskActionsPanel = ({
   const commentFieldId = useId()
   const randomReviewId = useId()
   const nearbyReviewId = useId()
-  const [task, setTask] = useState(taskProp as ReviewTask)
+  const incomingTask = taskProp as ReviewTask
+  const [localTask, setTask] = useState(incomingTask)
+  const task = incomingTask.id === localTask.id ? localTask : incomingTask
   const [comment, setComment] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -78,10 +88,11 @@ export const ReviewTaskActionsPanel = ({
   const [canReview, setCanReview] = useState<boolean | null>(() =>
     isCurrentUserReviewer() ? true : null
   )
+  const hasAttemptedReviewLock = useRef(false)
 
   useEffect(() => {
-    setTask(taskProp as ReviewTask)
-  }, [taskProp])
+    hasAttemptedReviewLock.current = false
+  }, [task.id])
 
   useEffect(() => {
     let cancelled = false
@@ -99,12 +110,40 @@ export const ReviewTaskActionsPanel = ({
   const claimedBy = lock?.claimedById ?? null
   const isClaimedByMe = lock?.isMine ?? false
   const challengeIdFromSearch =
-    typeof window === 'undefined'
+    reviewChallengeIdFromSearch(search) ??
+    (typeof window === 'undefined'
       ? null
-      : Number(new URLSearchParams(window.location.search).get('reviewChallengeId')) || null
+      : Number(new URLSearchParams(window.location.search).get('reviewChallengeId')) || null)
   const reviewChallengeId =
     challengeIdFromSearch ??
     (typeof task.parent === 'number' ? task.parent : (task.parent?.id ?? null))
+
+  // Same idea as host ?claimTask=true for Map: entering review mode claims via
+  // /review/start so session_history records Custom/Review. Do not retry after
+  // an explicit unlock on this same task.
+  useEffect(() => {
+    if (canReview !== true) return
+    if (hasAttemptedReviewLock.current) return
+    if (claimedBy != null) return
+    hasAttemptedReviewLock.current = true
+    let cancelled = false
+    void (async () => {
+      try {
+        const updatedTask = await startTaskReview<ReviewTask>(task.id)
+        if (!cancelled) {
+          setTask(updatedTask)
+          setStatusMessage('Task locked for review')
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Unknown review error')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [canReview, claimedBy, task.id])
 
   if (canReview === null) {
     return (

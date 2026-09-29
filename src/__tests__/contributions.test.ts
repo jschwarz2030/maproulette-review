@@ -12,6 +12,7 @@ import {
 import { COMPLETION_STATUSES, isReviewModeActive } from '../lib/reviewMode'
 import { isRejectedForMapperRevision } from '../lib/reviewStatus'
 import { canRenderReviewHistoryItem } from '../components/ReviewHistoryItem'
+import { canRenderReviewSessionHistoryItem } from '../components/ReviewSessionHistoryItem'
 import { isMapperRevisionPanelActive } from '../components/MapperRevisionActions'
 import {
   ERROR_TAG_REVIEW_STATUSES,
@@ -39,6 +40,12 @@ describe('reviewMode', () => {
 
     window.history.replaceState({}, '', '/tasks/1?review=true')
     expect(isReviewModeActive()).toBe(true)
+
+    window.history.replaceState({}, '', '/tasks/1?review=true')
+    expect(isReviewModeActive({ review: false })).toBe(false)
+
+    window.history.replaceState({}, '', '/tasks/1')
+    expect(isReviewModeActive({ review: true })).toBe(true)
 
     window.history.replaceState({}, '', '/tasks/1?review=1')
     expect(isReviewModeActive()).toBe(true)
@@ -116,6 +123,36 @@ describe('history item rendering', () => {
       })
     ).toBe(false)
   })
+
+  it('renders Custom/Review lock and unlock session events', () => {
+    expect(
+      canRenderReviewSessionHistoryItem({
+        taskId: 1,
+        timestamp: '2024-01-01',
+        event: 'lock',
+        sessionType: 'Custom',
+        subType: 'Review',
+      })
+    ).toBe(true)
+    expect(
+      canRenderReviewSessionHistoryItem({
+        taskId: 1,
+        timestamp: '2024-01-01',
+        event: 'unlock',
+        sessionType: 'Custom',
+        subType: 'Review',
+      })
+    ).toBe(true)
+    expect(
+      canRenderReviewSessionHistoryItem({
+        taskId: 1,
+        timestamp: '2024-01-01',
+        event: 'lock',
+        sessionType: 'Map',
+        subType: null,
+      })
+    ).toBe(false)
+  })
 })
 
 describe('plugin contributions', () => {
@@ -164,6 +201,14 @@ describe('plugin contributions', () => {
       reviewPanel?.isActive?.({ pathname: '/tasks/1', search: {}, task: {} })
     ).toBe(false)
 
+    expect(
+      reviewPanel?.isActive?.({
+        pathname: '/tasks/1',
+        search: { review: true },
+        task: {},
+      })
+    ).toBe(true)
+
     window.history.replaceState({}, '', '/tasks/1?review=true')
     expect(
       reviewPanel?.isActive?.({ pathname: '/tasks/1', search: {}, task: {} })
@@ -182,9 +227,10 @@ describe('plugin contributions', () => {
     expect(getChallengeFooterExtensions()[0]?.id).toBe(
       'maproulette-review-challenge-footer'
     )
-    expect(getTaskHistoryItemRenderers()[0]?.id).toBe(
-      'maproulette-review-history-item'
-    )
+    expect(getTaskHistoryItemRenderers().map((renderer) => renderer.id)).toEqual([
+      'maproulette-review-session-history-item',
+      'maproulette-review-history-item',
+    ])
     expect(getUserSettingsFields()[0]).toEqual(
       expect.objectContaining({
         id: 'maproulette-review-volunteer-reviewer',
